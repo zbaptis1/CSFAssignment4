@@ -27,11 +27,11 @@ int main(int argc, char **argv) {
     // TODO: implemen
     ifstream FILE(argv[1], std::ios::in | std::ios::binary);
     char isELF[4];
-    FILE.read(bytes, 4);
-    if (!(isELF[1] == 'E' && isELF[2] == 'L' && isELF[3] == 'F')) {
+    FILE.read(isELF, 4);
+    if (!(isELF[0] == 127 && isELF[1] == 'E' && isELF[2] == 'L' && isELF[3] == 'F')) {
         cout << "Not an ELF file" << endl; 
         FILE.close();
-        exit();
+        return 0;
     }
     // For ELF files
 
