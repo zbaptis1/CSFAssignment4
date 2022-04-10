@@ -9,7 +9,7 @@ OBJS = magic.o elf_names.o
 magic : $(OBJS)
 	$(CXX) $(CXXFLAGS) -o $@ $(OBJS)
 
-magic.o : magic.cpp elf_names.h magic.h
+magic.o : magic.cpp elf_names.h
 
 elf_names.o : elf_names.cpp elf_names.h
 
