@@ -25,21 +25,74 @@ using std::cout;
 using std::endl;
 using std::string;
 
+
+// plan to move to another file
+// bring back magic.h ??
+struct SectionInfo {
+    bool isValid;
+    const char * name;
+    unsigned type, offset, size, entsize;
+
+    SectionInfo() : isValid(false), name(""), type(0), offset(0), size(0), entsize(0) { }
+};
+
+struct ELFFile {
+    int fileDescription;
+    size_t fileSize;
+    unsigned char * data;
+    unsigned offset, shnum, shentsize;
+    unsigned shstrndx;
+    unsigned strtabIndex; 
+    unsigned symtabIndex;
+    SectionInfo * sectionInfo;
+
+    ELFFile();
+    ~ELFile(); // giving compiler warnings need to fix later
+
+    int mapFile(const char * filename);
+    void unmapFile();
+
+    // implment below
+    unsigned char * getData(unsigned offset, unsigned size);
+    int isELF();
+
+    Elf64_Ehdr * createELF();
+
+    // implment functions for printing
+    void printSummary();
+    void printSections();
+    void printSymbols();
+};
+
+
+
+
+
+
+
+/** TODO: Change up main from TA's help */
 int main(int argc, char **argv) {
+    if (argc != 2) { 
+        cout << "Invalid arguments" << endl;
+        return 1;
+    }
+
+    const char * filename = argv[1];
+
+
+
     // TODO: implement
     ifstream FILE(argv[1], std::ios::in | std::ios::binary);
     char isELF[17];
     FILE.read(isELF, 17);
+    // magic number
     if (!(isELF[0] == 127 && isELF[1] == 'E' && isELF[2] == 'L' && isELF[3] == 'F')) {
         cout << "Not an ELF file" << endl; 
         FILE.close();
         return 0;
     }
     // For ELF files
-
     /** TODO: need to see if this works, use some of the test files */
-
-
     /** TODO: data is a pointer to the beginning of the file */
     unsigned char * data;
     Elf64_Ehdr *elf_header = (Elf64_Ehdr *) data;    
@@ -96,10 +149,73 @@ int main(int argc, char **argv) {
         cout << "Symbol " << i << ": name=" << get_type_name(i) << ", ";
         printf("size=%lx, info=%lx, other=%lx", X, Y, Z);
     }
-
-
-
-
 }
+
+
+/* Struct Header */
+ELFFile::ELFFile()
+    : fileDescription(-1)
+    , fileSize(0)
+    , data(nullptr)
+    , offset(0)
+    , shnum(0)
+    , shentsize(0)
+    , shstrndx(0)
+    , strtabIndex(0)
+    , symtabIndex(0)
+   , sectionInfo(nullptr) {
+}
+
+ELFFile::~ELFFile() { delete sectionInfo; }
+
+int ELFFile::mapFile(const char * filename) {
+    int stat;
+    struct stat statbuf;
+
+    fileDescription = open(filename, O_RDONLY);
+    if (fileDescription < 0) { return 0; }
+
+    stat = fstat(fileDescription, &statbuf);
+    if (stat != 0) {
+        close(fileDescription);
+        return 0;
+    }
+
+    fileSize = (size_t) statbuf.st_size;
+
+    data = static_cast<unsigned char *> (mmap(nullptr, fileSize, PROT_READ, MAP_PRIVATE, fileDescription, 0));
+    if (data == nullptr) {
+        close(fileDescription);
+        return 0;
+    }
+
+    return 1;
+}
+
+void ELFFile::unmapFile() {
+    munmap(data, fileSize);
+    close(fileDescription);
+}
+
+unsigned char * ELFFile::getData(unsigned offset, unsigned size) { }
+ 
+int ELFFile::isELF() {
+    unsigned char magicNumber[4] = {0x7F, 'E', 'L', 'F'};
+    return memcmp(data, magicNumber, 4) == 0;
+}
+
+Elf64_Ehdr * ELFFile::createELF() { }
+
+// implment functions for printing
+void ELFFile::printSummary() { }
+void ELFFile::printSections() { }
+void ELFFile::printSymbols() { }
+
+
+
+
+
+
+
 
 
