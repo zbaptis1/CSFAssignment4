@@ -56,9 +56,13 @@ struct ELFFile {
     unsigned char * getData(unsigned offset, unsigned size);
     int isELF();
 
-    Elf64_Ehdr * createELF();
+    Elf64_Ehdr * getELF();
 
     // implment functions for printing
+
+    const char * getTypeName();
+    const char * getMachineName();
+
     void printSummary();
     void printSections();
     void printSymbols();
@@ -72,14 +76,12 @@ struct ELFFile {
 
 /** TODO: Change up main from TA's help */
 int main(int argc, char **argv) {
-    if (argc != 2) { 
+    if (argc != 2) { // Error check
         cout << "Invalid arguments" << endl;
         return 1;
     }
 
     const char * filename = argv[1];
-
-
 
     // TODO: implement
     ifstream FILE(argv[1], std::ios::in | std::ios::binary);
@@ -117,14 +119,7 @@ int main(int argc, char **argv) {
     else { cout << "Big endian" << endl; }
 
     // Section info
-    /* in the following format:
-    Section header N: name=name, type=X offset=Y, size=Z
-    N is a section index in the range 0 to e_shnum-1. 
-    name is the section name, which will be a NUL-terminated string value in the .shstrtab section data. 
-    X, Y, Z are the values of the section header’s sh_type, sh_offset, and sh_size values, respectively. 
-    Each of these values should be printed using the %lx conversion using printf. 
-    Note that the name may be an empty string. */
-    
+
     for (uint16_t i = 0; i < elf_header->e_shnum; i++) {
         /** TODO: Figure out how to do name, X, Y, and Z; go to TA's */
         unsigned long int X, Y, Z;
@@ -133,15 +128,6 @@ int main(int argc, char **argv) {
     }
 
     // Symbol info
-    /* in the following format:
-    Symbol N: name=name, size=X, info=Y, other=Z
-    N is the index of the symbol (0 for first symbol), 
-    name is the name of the symbol based on the value of the symbol’s st_name value 
-        (if non-zero, it specifies an offset in the .strtab section.) 
-    X, Y, Z are the values of the symbol’s st_size, st_info, and st_other fields, respectively, 
-        printed using printf with the %lx conversion. */
-
-        // when will the loop end?
     for (uint16_t i = 0; i < elf_header->e_shnum; i++) {
         /** TODO: Figure out how to do name X Y and Z; go to TA's */
         unsigned long int X, Y, Z;
@@ -197,19 +183,77 @@ void ELFFile::unmapFile() {
     close(fileDescription);
 }
 
-unsigned char * ELFFile::getData(unsigned offset, unsigned size) { }
+unsigned char * ELFFile::getData(unsigned offset, unsigned size) { 
+    if (offset > size) { return nullptr; } // logically cant happen
+    if ((offset + size) > size) { return nullptr; } // goes beyond EOF
+    if ((offset + size) < offset) { return nullptr; } // overflow
+
+    return data + offset; 
+}
  
 int ELFFile::isELF() {
     unsigned char magicNumber[4] = {0x7F, 'E', 'L', 'F'};
     return memcmp(data, magicNumber, 4) == 0;
 }
 
-Elf64_Ehdr * ELFFile::createELF() { }
+Elf64_Ehdr * ELFFile::getELF() { return reinterpret_cast<Elf64_Ehdr * > (data); }
 
-// implment functions for printing
-void ELFFile::printSummary() { }
-void ELFFile::printSections() { }
-void ELFFile::printSymbols() { }
+/** Printing Functions */
+const char * ELFFile::getTypeName() {
+    Elf64_Ehdr * file = getELF();
+    Elf64_Half objtype = file->e_type;
+    return get_type_name(objtype);
+}
+
+const char * ELFFile::getMachineName() {
+    Elf64_Ehdr * file = getELF();
+    Elf64_Half machtype = file->e_machine;
+    return get_type_name(machtype);
+}
+
+
+void ELFFile::printSummary() { /** TODO: */
+    cout << "Object file type: " << getTypeName() << endl;
+    cout << "Instruction set: " << getMachineName() << endl;
+    cout << "Endianness: " << endianness << endl;
+ }
+
+void ELFFile::printSections() { 
+    for (unsigned i = 0; i < shnum; i++) {
+        struct SectionInfo * curr = &sectionInfo[i];
+        if (!(curr->isValid)) { printf("Section header %u: Invalid Section\n", i ); }
+        else {
+            printf("Section header %u: name=%s, type=%lx, offset=%lx, size=%lx\n", 
+            i, curr->name, uint64_t(curr->type), uint64_t(curr->offset), uint64_t(curr->size));
+        }
+    }
+}
+
+void ELFFile::printSymbols() {
+    struct SectionInfo * symbolInfo = &sectionInfo[symtabIndex];
+    if (strcmp(".symtab", symbolInfo->name) != 0) { return; }
+
+    unsigned symbolOffset = symbolInfo->offset;
+    unsigned end = symbolOffset + symbolInfo->size;
+    unsigned i = 0;
+
+    while (symbolOffset < end) {
+        // get current symbol
+        unsigned char * curr = getData(symbolOffset, symbolInfo->size);
+
+        if (curr != nullptr) {
+            Elf64_Sym * elfSymbol = reinterpret_cast<Elf64_Sym *>(curr);
+            unsigned st_name = elfSymbol->st_name;
+            // match string to the ones in elf_names.cpp file
+            const char * name;
+            printf("Symbol %u: name=%s, size=%lx, info=%lx, other=%lx\n",
+                    i, name, elfSymbol->st_size, uint64_t(elfSymbol->st_info), uint64_t(elfSymbol->st_other));
+        }
+
+        symbolOffset += symbolInfo->size;
+        i++;
+    }
+}
 
 
 
