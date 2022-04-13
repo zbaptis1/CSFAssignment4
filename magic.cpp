@@ -12,15 +12,10 @@
 #include <fcntl.h>
 
 #include <iostream>
-#include <fstream>
-#include <iterator>
-#include <string>
-#include <vector>
 
 #include "elf_names.h"
 
 using std::ifstream;
-using std::vector;
 using std::cout;
 using std::endl;
 using std::string;
@@ -52,7 +47,7 @@ struct ELFFile {
     int mapFile(const char * filename);
     void unmapFile();
 
-    unsigned char * getData(unsigned offset, unsigned size);
+    unsigned char * getData(unsigned off, unsigned size);
     int isELF();
 
     Elf64_Ehdr * getELF();
@@ -70,29 +65,34 @@ struct ELFFile {
 };
 
 
-int main(int argc, char **argv) {
-    if (argc != 2) { // Error check
+int main(int argc, char **argv) {    
+
+    if (argc < 2) { // Error check
         cout << "Invalid arguments" << endl;
-        return 1;
+        return 0;
+    }
+
+    for (int i = 0; i < argc; i++) {
+        printf("%d : %s\n", i, argv[i]);
     }
 
     const char * filename = argv[1];
 
     struct ELFFile elf;
-    if(!(elf.mapFile(filename))) { 
+    
+    if(!elf.mapFile(filename)) { 
         cout << "Could not map" << endl;
-        return 1;
+        return 0;
     }
 
     if (!(elf.isELF())) { 
         cout << "Not an ELF file" << endl; 
-        return 1;
+        return 0;
     }
 
     /* Output */
     // Summary
     elf.printSummary();
-
 
     // Section & Symbol info
     if (!elf.scanSections()) {
@@ -127,7 +127,9 @@ int ELFFile::mapFile(const char * filename) {
     struct stat statbuf;
 
     fileDescription = open(filename, O_RDONLY);
-    if (fileDescription < 0) { return 0; }
+    if (fileDescription < 0) {
+        return 0;
+     }
 
     stat = fstat(fileDescription, &statbuf);
     if (stat != 0) {
@@ -151,15 +153,19 @@ void ELFFile::unmapFile() {
     close(fileDescription);
 }
 
-unsigned char * ELFFile::getData(unsigned offset, unsigned size) { 
-    if (offset > size) { return nullptr; } // logically cant happen
-    if ((offset + size) > size) { return nullptr; } // goes beyond EOF
-    if ((offset + size) < offset) { return nullptr; } // overflow
+unsigned char * ELFFile::getData(unsigned off, unsigned size) { 
+    if (off > size) { return nullptr; } // logically cant happen
+    if ((off + size) < size) { return nullptr; } // goes beyond EOF
+    if ((off + size) > off) { return nullptr; } // overflow
 
-    return data + offset; 
+    return data + off; 
 }
  
 int ELFFile::isELF() {
+    if (fileSize < 56) { 
+        return 0;
+    }
+
     unsigned char magicNumber[4] = {0x7F, 'E', 'L', 'F'};
     return memcmp(data, magicNumber, 4) == 0;
 }
@@ -168,15 +174,15 @@ Elf64_Ehdr * ELFFile::getELF() { return reinterpret_cast<Elf64_Ehdr * > (data); 
 
 /** Printing Functions */
 const char * ELFFile::getTypeName() {
-    Elf64_Ehdr * file = getELF();
-    Elf64_Half objtype = file->e_type;
+    Elf32_Ehdr * file = reinterpret_cast<Elf32_Ehdr * > (data);
+    Elf32_Half objtype = file->e_type;
     return get_type_name(objtype);
 }
 
 const char * ELFFile::getMachineName() {
     Elf64_Ehdr * file = getELF();
-    Elf64_Half machtype = file->e_machine;
-    return get_type_name(machtype);
+    Elf32_Half machtype = file->e_machine;
+    return get_machine_name(machtype);
 }
 
 int ELFFile::findSectionHeader() {
@@ -192,21 +198,32 @@ int ELFFile::findSectionHeader() {
     }
 }
 
-int ELFFile::scanSections() {
+int ELFFile::scanSections() { // SEG FAULTING HERE
     if (!findSectionHeader()) { return 0; }
 
     sectionInfo = new SectionInfo[shnum];
 
     for (unsigned i = 0; i < shnum; i++) { // iterates through all sections
-        unsigned char * header = getData(offset + (i * shentsize), shentsize);
+        unsigned char * header = getData(offset, shentsize);
+        cout << offset << "--------" << shentsize << endl;
+        // header is null, bc offset > size
+        //TODO: why is offset so much bigger than size
 
-        Elf64_Shdr * curr = reinterpret_cast<Elf64_Shdr * >(header);
+
+            Elf64_Shdr * curr = reinterpret_cast<Elf64_Shdr * >(header);
+            
+            sectionInfo[i].isValid = true;
+            cout << "1 HERE!!" << endl;
+            sectionInfo[i].type = unsigned (curr->sh_type); /** TODO: ISSUE HERE */
+            cout << "2 HERE!!" << endl;
+            sectionInfo[i].offset = (unsigned) curr->sh_offset;
+            cout << "3 HERE!!" << endl;
+            sectionInfo[i].size = (unsigned) curr->sh_size;
+            cout << "4 HERE!!" << endl;
+            sectionInfo[i].entsize = (unsigned) curr->sh_entsize;
+            cout << "5 HERE!!" << endl;
         
-        sectionInfo[i].isValid = true;
-        sectionInfo[i].type = curr->sh_type;
-        sectionInfo[i].offset = curr->sh_offset;
-        sectionInfo[i].size = curr->sh_size;
-        sectionInfo[i].entsize = curr->sh_entsize;
+        
     }
 
     if (shstrndx >= shnum) { return 0; }
@@ -214,11 +231,12 @@ int ELFFile::scanSections() {
     for (unsigned i = 0; i < shnum; i++) {
         unsigned char * header = getData(offset + (i * shentsize), shentsize);
 
-        Elf64_Shdr * curr = reinterpret_cast<Elf64_Shdr *>(header);
-        sectionInfo[i].name = findString(shstrndx, curr->sh_name);
+            Elf64_Shdr * curr = reinterpret_cast<Elf64_Shdr *>(header);
+            sectionInfo[i].name = findString(shstrndx, curr->sh_name);
 
-        if (strcmp(".strtab", sectionInfo[i].name) == 0) { strtabIndex = i; }
-        if (strcmp(".symtab", sectionInfo[i].name) == 0) { symtabIndex = i; }
+            if (strcmp(".strtab", sectionInfo[i].name) == 0) { strtabIndex = i; }
+            if (strcmp(".symtab", sectionInfo[i].name) == 0) { symtabIndex = i; }
+        
     }
 
     return 1;
@@ -228,7 +246,7 @@ int ELFFile::scanSections() {
 void ELFFile::printSummary() {
     printf("Object file type: %s\n", getTypeName());
     printf("Instruction set: %s\n", getMachineName());
-    printf("Endianness: Little Endiann\n");
+    printf("Endianness: Little endian\n");
  }
 
 void ELFFile::printSections() { 
@@ -270,10 +288,10 @@ void ELFFile::printSymbols() {
 
 const char * ELFFile::findString(unsigned symbolIndex, unsigned symbolOffset) {
     const SectionInfo &info = sectionInfo[symbolIndex]; 
-    unsigned offset = info.offset;
-    unsigned index = offset + symbolOffset;
+    unsigned off = info.offset;
+    unsigned index = off + symbolOffset;
 
-    if (index < offset) { return nullptr; }
+    if (index < off) { return nullptr; }
     
     unsigned i = index;
     while (i < fileSize) {
