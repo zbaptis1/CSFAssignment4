@@ -47,8 +47,8 @@ struct ELFFile {
     SectionInfo * sectionInfo;
 
     ELFFile();
-    ~ELFile(); // giving compiler warnings need to fix later
-
+    ~ELFFile();
+    
     int mapFile(const char * filename);
     void unmapFile();
 
