@@ -26,9 +26,9 @@ using std::string;
 struct SectionInfo {
     bool isValid;
     const char * name;
-    unsigned type, offset, size, entsize;
+    unsigned secType, secOffset, secSize, secEntsize;
 
-    SectionInfo() : isValid(false), name(""), type(0), offset(0), size(0), entsize(0) { }
+    SectionInfo() : isValid(false), name(""), secType(0), secOffset(0), secSize(0), secEntsize(0) { }
 };
 
 struct ELFFile {
@@ -95,9 +95,10 @@ int main(int argc, char **argv) {
     elf.printSummary();
 
     // Section & Symbol info
-    if (!elf.scanSections()) {
+    if (!elf.scanSections()) { // SEG FAULT HERE
         printf("Invalid section headers");
     } else {
+        cout << elf.offset << "---TEST--" << elf.shentsize << endl;
         elf.printSections();
         elf.printSymbols();
     }
@@ -170,7 +171,12 @@ int ELFFile::isELF() {
     return memcmp(data, magicNumber, 4) == 0;
 }
 
-Elf64_Ehdr * ELFFile::getELF() { return reinterpret_cast<Elf64_Ehdr * > (data); }
+Elf64_Ehdr * ELFFile::getELF() { 
+    if (((Elf32_Ehdr *)data)->e_ident[EI_CLASS] == 2) {
+        return reinterpret_cast<Elf64_Ehdr * > (data); 
+    }
+    return nullptr;
+}
 
 /** Printing Functions */
 const char * ELFFile::getTypeName() {
@@ -180,7 +186,7 @@ const char * ELFFile::getTypeName() {
 }
 
 const char * ELFFile::getMachineName() {
-    Elf64_Ehdr * file = getELF();
+    Elf32_Ehdr * file = reinterpret_cast<Elf32_Ehdr * > (data);
     Elf32_Half machtype = file->e_machine;
     return get_machine_name(machtype);
 }
@@ -188,7 +194,7 @@ const char * ELFFile::getMachineName() {
 int ELFFile::findSectionHeader() {
     Elf64_Ehdr * header = getELF();
     if (header != nullptr) {
-        offset = header->e_shoff;       
+        offset = header->e_shoff; /** TODO: the issue is here, offset is so big */
         shnum = header->e_shnum;
         shentsize = header->e_shentsize;
         shstrndx = header->e_shstrndx;
@@ -200,6 +206,7 @@ int ELFFile::findSectionHeader() {
 
 int ELFFile::scanSections() { // SEG FAULTING HERE
     if (!findSectionHeader()) { return 0; }
+    cout << offset << "--------" << shentsize << endl;
 
     sectionInfo = new SectionInfo[shnum];
 
@@ -208,19 +215,20 @@ int ELFFile::scanSections() { // SEG FAULTING HERE
         cout << offset << "--------" << shentsize << endl;
         // header is null, bc offset > size
         //TODO: why is offset so much bigger than size
+        // MAIN ISSUE
 
 
             Elf64_Shdr * curr = reinterpret_cast<Elf64_Shdr * >(header);
             
             sectionInfo[i].isValid = true;
             cout << "1 HERE!!" << endl;
-            sectionInfo[i].type = unsigned (curr->sh_type); /** TODO: ISSUE HERE */
+            sectionInfo[i].secType = unsigned (curr->sh_type); /** TODO: ISSUE HERE */
             cout << "2 HERE!!" << endl;
-            sectionInfo[i].offset = (unsigned) curr->sh_offset;
+            sectionInfo[i].secOffset = (unsigned) curr->sh_offset;
             cout << "3 HERE!!" << endl;
-            sectionInfo[i].size = (unsigned) curr->sh_size;
+            sectionInfo[i].secSize = (unsigned) curr->sh_size;
             cout << "4 HERE!!" << endl;
-            sectionInfo[i].entsize = (unsigned) curr->sh_entsize;
+            sectionInfo[i].secEntsize = (unsigned) curr->sh_entsize;
             cout << "5 HERE!!" << endl;
         
         
@@ -255,7 +263,7 @@ void ELFFile::printSections() {
         if (!(curr->isValid)) { printf("Section header %u: Invalid Section\n", i ); }
         else {
             printf("Section header %u: name=%s, type=%lx, offset=%lx, size=%lx\n", 
-            i, curr->name, uint64_t(curr->type), uint64_t(curr->offset), uint64_t(curr->size));
+            i, curr->name, uint64_t(curr->secType), uint64_t(curr->secOffset), uint64_t(curr->secSize));
         }
     }
 }
@@ -264,13 +272,13 @@ void ELFFile::printSymbols() {
     struct SectionInfo * symbolInfo = &sectionInfo[symtabIndex];
     if (strcmp(".symtab", symbolInfo->name) != 0) { return; }
 
-    unsigned symbolOffset = symbolInfo->offset;
-    unsigned end = symbolOffset + symbolInfo->size;
+    unsigned symbolOffset = symbolInfo->secOffset;
+    unsigned end = symbolOffset + symbolInfo->secSize;
     unsigned i = 0;
 
     while (symbolOffset < end) {
         // get current symbol
-        unsigned char * curr = getData(symbolOffset, symbolInfo->size);
+        unsigned char * curr = getData(symbolOffset, symbolInfo->secSize);
 
         if (curr != nullptr) {
             Elf64_Sym * elfSymbol = reinterpret_cast<Elf64_Sym *>(curr);
@@ -281,14 +289,14 @@ void ELFFile::printSymbols() {
                     i, name, elfSymbol->st_size, uint64_t(elfSymbol->st_info), uint64_t(elfSymbol->st_other));
         }
 
-        symbolOffset += symbolInfo->size;
+        symbolOffset += symbolInfo->secSize;
         i++;
     }
 }
 
 const char * ELFFile::findString(unsigned symbolIndex, unsigned symbolOffset) {
     const SectionInfo &info = sectionInfo[symbolIndex]; 
-    unsigned off = info.offset;
+    unsigned off = info.secOffset;
     unsigned index = off + symbolOffset;
 
     if (index < off) { return nullptr; }
