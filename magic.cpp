@@ -48,7 +48,7 @@ struct ELFFile {
 
     ELFFile();
     ~ELFFile();
-    
+
     int mapFile(const char * filename);
     void unmapFile();
 
@@ -60,6 +60,8 @@ struct ELFFile {
     const char * getTypeName();
     const char * getMachineName();
 
+    int findSectionHeader();
+    int scanSections();
     void printSummary();
     void printSections();
     void printSymbols();
@@ -68,7 +70,6 @@ struct ELFFile {
 };
 
 
-/** TODO: Change up main from TA's help */
 int main(int argc, char **argv) {
     if (argc != 2) { // Error check
         cout << "Invalid arguments" << endl;
@@ -77,24 +78,32 @@ int main(int argc, char **argv) {
 
     const char * filename = argv[1];
 
-    ELFFile * elf = new ELFFile;
-    elf->mapFile(filename);
+    struct ELFFile elf;
+    if(!(elf.mapFile(filename))) { 
+        cout << "Could not map" << endl;
+        return 1;
+    }
 
-    if (elf->isELF() == 1) { 
+    if (!(elf.isELF())) { 
         cout << "Not an ELF file" << endl; 
         return 1;
     }
 
     /* Output */
     // Summary
-    elf->printSummary();
-    // Section info
-    elf->printSections();
-    // Symbol info
-    elf->printSymbols();
+    elf.printSummary();
 
 
-    elf->unmapFile();
+    // Section & Symbol info
+    if (!elf.scanSections()) {
+        printf("Invalid section headers");
+    } else {
+        elf.printSections();
+        elf.printSymbols();
+    }
+
+    elf.unmapFile();
+    return 0; 
 }
 
 /* Struct Header */
@@ -170,11 +179,56 @@ const char * ELFFile::getMachineName() {
     return get_type_name(machtype);
 }
 
+int ELFFile::findSectionHeader() {
+    Elf64_Ehdr * header = getELF();
+    if (header != nullptr) {
+        offset = header->e_shoff;       
+        shnum = header->e_shnum;
+        shentsize = header->e_shentsize;
+        shstrndx = header->e_shstrndx;
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+int ELFFile::scanSections() {
+    if (!findSectionHeader()) { return 0; }
+
+    sectionInfo = new SectionInfo[shnum];
+
+    for (unsigned i = 0; i < shnum; i++) { // iterates through all sections
+        unsigned char * header = getData(offset + (i * shentsize), shentsize);
+
+        Elf64_Shdr * curr = reinterpret_cast<Elf64_Shdr * >(header);
+        
+        sectionInfo[i].isValid = true;
+        sectionInfo[i].type = curr->sh_type;
+        sectionInfo[i].offset = curr->sh_offset;
+        sectionInfo[i].size = curr->sh_size;
+        sectionInfo[i].entsize = curr->sh_entsize;
+    }
+
+    if (shstrndx >= shnum) { return 0; }
+
+    for (unsigned i = 0; i < shnum; i++) {
+        unsigned char * header = getData(offset + (i * shentsize), shentsize);
+
+        Elf64_Shdr * curr = reinterpret_cast<Elf64_Shdr *>(header);
+        sectionInfo[i].name = findString(shstrndx, curr->sh_name);
+
+        if (strcmp(".strtab", sectionInfo[i].name) == 0) { strtabIndex = i; }
+        if (strcmp(".symtab", sectionInfo[i].name) == 0) { symtabIndex = i; }
+    }
+
+    return 1;
+}
+
 
 void ELFFile::printSummary() {
-    cout << "Object file type: " << getTypeName() << endl;
-    cout << "Instruction set: " << getMachineName() << endl;
-    cout << "Endianness: " << "Little Endiann" << endl;
+    printf("Object file type: %s\n", getTypeName());
+    printf("Instruction set: %s\n", getMachineName());
+    printf("Endianness: Little Endiann\n");
  }
 
 void ELFFile::printSections() { 
