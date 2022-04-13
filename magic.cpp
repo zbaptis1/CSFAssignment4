@@ -52,13 +52,10 @@ struct ELFFile {
     int mapFile(const char * filename);
     void unmapFile();
 
-    // implment below
     unsigned char * getData(unsigned offset, unsigned size);
     int isELF();
 
     Elf64_Ehdr * getELF();
-
-    // implment functions for printing
 
     const char * getTypeName();
     const char * getMachineName();
@@ -66,12 +63,9 @@ struct ELFFile {
     void printSummary();
     void printSections();
     void printSymbols();
+
+    const char * findString(unsigned symbolIndex, unsigned symbolOffset);
 };
-
-
-
-
-
 
 
 /** TODO: Change up main from TA's help */
@@ -83,60 +77,25 @@ int main(int argc, char **argv) {
 
     const char * filename = argv[1];
 
-    // TODO: implement
-    ifstream FILE(argv[1], std::ios::in | std::ios::binary);
-    char isELF[17];
-    FILE.read(isELF, 17);
-    // magic number
-    if (!(isELF[0] == 127 && isELF[1] == 'E' && isELF[2] == 'L' && isELF[3] == 'F')) {
-        cout << "Not an ELF file" << endl; 
-        FILE.close();
-        return 0;
-    }
-    // For ELF files
-    /** TODO: need to see if this works, use some of the test files */
-    /** TODO: data is a pointer to the beginning of the file */
-    unsigned char * data;
-    Elf64_Ehdr *elf_header = (Elf64_Ehdr *) data;    
-    for (int i = 0; i < 17; i++) { 
-        elf_header->e_ident[i] = isELF[i]; 
-        cout << "HEADER: " << elf_header->e_ident[i];
-        cout << "\tISELF: " << isELF[i] << endl;
-    }
-    // focus on working on 64-bit ELF files first, as 32-bit isn't worth the amount of work for the grade
-    elf_header->e_ident[4] = '2'; 
+    ELFFile * elf = new ELFFile;
+    elf->mapFile(filename);
 
+    if (elf->isELF() == 1) { 
+        cout << "Not an ELF file" << endl; 
+        return 1;
+    }
 
     /* Output */
-    const char * objtype = get_type_name(elf_header->e_type);
-    const char * machtype = get_machine_name(elf_header->e_machine);
-
-    // Summary of ELF file
-    cout << "Object file type: " << objtype << endl;
-    cout << "Instruction set: " << machtype << endl;
-    cout << "Endianness: ";
-    if (elf_header->e_ident[5] == 1) { cout << "Little endian" << endl; }
-    else { cout << "Big endian" << endl; }
-
+    // Summary
+    elf->printSummary();
     // Section info
-
-    for (uint16_t i = 0; i < elf_header->e_shnum; i++) {
-        /** TODO: Figure out how to do name, X, Y, and Z; go to TA's */
-        unsigned long int X, Y, Z;
-        cout << "Symbol " << i << ": name=" << get_type_name(i) << ", ";
-        printf("type=%lx offset=%lx, size=%lx", X, Y, Z);
-    }
-
+    elf->printSections();
     // Symbol info
-    for (uint16_t i = 0; i < elf_header->e_shnum; i++) {
-        /** TODO: Figure out how to do name X Y and Z; go to TA's */
-        unsigned long int X, Y, Z;
+    elf->printSymbols();
 
-        cout << "Symbol " << i << ": name=" << get_type_name(i) << ", ";
-        printf("size=%lx, info=%lx, other=%lx", X, Y, Z);
-    }
+
+    elf->unmapFile();
 }
-
 
 /* Struct Header */
 ELFFile::ELFFile()
@@ -212,10 +171,10 @@ const char * ELFFile::getMachineName() {
 }
 
 
-void ELFFile::printSummary() { /** TODO: */
+void ELFFile::printSummary() {
     cout << "Object file type: " << getTypeName() << endl;
     cout << "Instruction set: " << getMachineName() << endl;
-    cout << "Endianness: " << endianness << endl;
+    cout << "Endianness: " << "Little Endiann" << endl;
  }
 
 void ELFFile::printSections() { 
@@ -245,7 +204,7 @@ void ELFFile::printSymbols() {
             Elf64_Sym * elfSymbol = reinterpret_cast<Elf64_Sym *>(curr);
             unsigned st_name = elfSymbol->st_name;
             // match string to the ones in elf_names.cpp file
-            const char * name;
+            const char * name = findString(strtabIndex, st_name);
             printf("Symbol %u: name=%s, size=%lx, info=%lx, other=%lx\n",
                     i, name, elfSymbol->st_size, uint64_t(elfSymbol->st_info), uint64_t(elfSymbol->st_other));
         }
@@ -255,6 +214,23 @@ void ELFFile::printSymbols() {
     }
 }
 
+const char * ELFFile::findString(unsigned symbolIndex, unsigned symbolOffset) {
+    const SectionInfo &info = sectionInfo[symbolIndex]; 
+    unsigned offset = info.offset;
+    unsigned index = offset + symbolOffset;
+
+    if (index < offset) { return nullptr; }
+    
+    unsigned i = index;
+    while (i < fileSize) {
+        unsigned char * curr = data + i;
+        if (*curr == '\0') {
+            return reinterpret_cast<const char *>(data + index);
+        }
+        i++;
+    }
+    return "";
+}
 
 
 
