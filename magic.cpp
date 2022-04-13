@@ -14,66 +14,19 @@
 #include <iostream>
 
 #include "elf_names.h"
+#include "magic.h"
 
 using std::ifstream;
 using std::cout;
 using std::endl;
-using std::string;
-
-
-// plan to move to another file
-// bring back magic.h ??
-struct SectionInfo {
-    bool isValid;
-    const char * name;
-    unsigned secType, secOffset, secSize, secEntsize;
-
-    SectionInfo() : isValid(false), name(""), secType(0), secOffset(0), secSize(0), secEntsize(0) { }
-};
-
-struct ELFFile {
-    int fileDescription;
-    size_t fileSize;
-    unsigned char * data;
-    unsigned offset, shnum, shentsize;
-    unsigned shstrndx;
-    unsigned strtabIndex; 
-    unsigned symtabIndex;
-    SectionInfo * sectionInfo;
-
-    ELFFile();
-    ~ELFFile();
-
-    int mapFile(const char * filename);
-    void unmapFile();
-
-    unsigned char * getData(unsigned off, unsigned size);
-    int isELF();
-
-    Elf64_Ehdr * getELF();
-
-    const char * getTypeName();
-    const char * getMachineName();
-
-    int findSectionHeader();
-    int scanSections();
-    void printSummary();
-    void printSections();
-    void printSymbols();
-
-    const char * findString(unsigned symbolIndex, unsigned symbolOffset);
-};
+using std::cerr;
 
 
 int main(int argc, char **argv) {    
 
-    if (argc < 2) { // Error check
-        cout << "Invalid arguments" << endl;
-        return 0;
-    }
-
-    for (int i = 0; i < argc; i++) {
-        printf("%d : %s\n", i, argv[i]);
+    if (argc != 2) {
+        cerr << "Invalid arguments" << endl;
+        return 1;
     }
 
     const char * filename = argv[1];
@@ -81,8 +34,8 @@ int main(int argc, char **argv) {
     struct ELFFile elf;
     
     if(!elf.mapFile(filename)) { 
-        cout << "Could not map" << endl;
-        return 0;
+        cerr << "Couldn't map" << endl;
+        return 2;
     }
 
     if (!(elf.isELF())) { 
@@ -91,14 +44,13 @@ int main(int argc, char **argv) {
     }
 
     /* Output */
-    // Summary
+
     elf.printSummary();
 
     // Section & Symbol info
-    if (!elf.scanSections()) { // SEG FAULT HERE
-        printf("Invalid section headers");
+    if (!elf.scanSections()) {
+        printf("All invalid section headers");
     } else {
-        cout << elf.offset << "---TEST--" << elf.shentsize << endl;
         elf.printSections();
         elf.printSymbols();
     }
@@ -107,9 +59,10 @@ int main(int argc, char **argv) {
     return 0; 
 }
 
+
 /* Struct Header */
 ELFFile::ELFFile()
-    : fileDescription(-1)
+    : fd(-1)
     , fileSize(0)
     , data(nullptr)
     , offset(0)
@@ -124,25 +77,24 @@ ELFFile::ELFFile()
 ELFFile::~ELFFile() { delete sectionInfo; }
 
 int ELFFile::mapFile(const char * filename) {
-    int stat;
     struct stat statbuf;
 
-    fileDescription = open(filename, O_RDONLY);
-    if (fileDescription < 0) {
+    int fd = open(filename, O_RDONLY);
+    if (fd < 0) {
         return 0;
      }
 
-    stat = fstat(fileDescription, &statbuf);
-    if (stat != 0) {
-        close(fileDescription);
+    int rc = fstat(fd, &statbuf);
+    if (rc != 0) {
+        close(fd);
         return 0;
     }
 
     fileSize = (size_t) statbuf.st_size;
 
-    data = static_cast<unsigned char *> (mmap(nullptr, fileSize, PROT_READ, MAP_PRIVATE, fileDescription, 0));
+    data = static_cast<unsigned char *> (mmap(nullptr, fileSize, PROT_READ, MAP_PRIVATE, fd, 0));
     if (data == nullptr) {
-        close(fileDescription);
+        close(fd);
         return 0;
     }
 
@@ -151,19 +103,19 @@ int ELFFile::mapFile(const char * filename) {
 
 void ELFFile::unmapFile() {
     munmap(data, fileSize);
-    close(fileDescription);
+    close(fd);
 }
 
 unsigned char * ELFFile::getData(unsigned off, unsigned size) { 
-    if (off > size) { return nullptr; } // logically cant happen
-    if ((off + size) < size) { return nullptr; } // goes beyond EOF
-    if ((off + size) > off) { return nullptr; } // overflow
+    if (off > fileSize) { return nullptr; }
+    if ((off + size) > fileSize) { return nullptr; }
+    if ((off + size) < off) { return nullptr; }
 
     return data + off; 
 }
  
 int ELFFile::isELF() {
-    if (fileSize < 56) { 
+    if (fileSize < 56) { // not enough space
         return 0;
     }
 
@@ -172,29 +124,26 @@ int ELFFile::isELF() {
 }
 
 Elf64_Ehdr * ELFFile::getELF() { 
-    if (((Elf32_Ehdr *)data)->e_ident[EI_CLASS] == 2) {
-        return reinterpret_cast<Elf64_Ehdr * > (data); 
-    }
-    return nullptr;
+    return reinterpret_cast<Elf64_Ehdr * > (data); 
 }
 
 /** Printing Functions */
 const char * ELFFile::getTypeName() {
-    Elf32_Ehdr * file = reinterpret_cast<Elf32_Ehdr * > (data);
-    Elf32_Half objtype = file->e_type;
+    Elf64_Ehdr * file = getELF();
+    Elf64_Half objtype = file->e_type;
     return get_type_name(objtype);
 }
 
 const char * ELFFile::getMachineName() {
-    Elf32_Ehdr * file = reinterpret_cast<Elf32_Ehdr * > (data);
-    Elf32_Half machtype = file->e_machine;
+    Elf64_Ehdr * file = getELF();
+    Elf64_Half machtype = file->e_machine;
     return get_machine_name(machtype);
 }
 
 int ELFFile::findSectionHeader() {
     Elf64_Ehdr * header = getELF();
     if (header != nullptr) {
-        offset = header->e_shoff; /** TODO: the issue is here, offset is so big */
+        offset = header->e_shoff;
         shnum = header->e_shnum;
         shentsize = header->e_shentsize;
         shstrndx = header->e_shstrndx;
@@ -204,34 +153,21 @@ int ELFFile::findSectionHeader() {
     }
 }
 
-int ELFFile::scanSections() { // SEG FAULTING HERE
+int ELFFile::scanSections() {
     if (!findSectionHeader()) { return 0; }
-    cout << offset << "--------" << shentsize << endl;
 
     sectionInfo = new SectionInfo[shnum];
 
-    for (unsigned i = 0; i < shnum; i++) { // iterates through all sections
-        unsigned char * header = getData(offset, shentsize);
-        cout << offset << "--------" << shentsize << endl;
-        // header is null, bc offset > size
-        //TODO: why is offset so much bigger than size
-        // MAIN ISSUE
-
-
-            Elf64_Shdr * curr = reinterpret_cast<Elf64_Shdr * >(header);
-            
-            sectionInfo[i].isValid = true;
-            cout << "1 HERE!!" << endl;
-            sectionInfo[i].secType = unsigned (curr->sh_type); /** TODO: ISSUE HERE */
-            cout << "2 HERE!!" << endl;
-            sectionInfo[i].secOffset = (unsigned) curr->sh_offset;
-            cout << "3 HERE!!" << endl;
-            sectionInfo[i].secSize = (unsigned) curr->sh_size;
-            cout << "4 HERE!!" << endl;
-            sectionInfo[i].secEntsize = (unsigned) curr->sh_entsize;
-            cout << "5 HERE!!" << endl;
+    for (unsigned i = 0; i < shnum; i++) { 
+        unsigned char * header = getData(offset + (i * shentsize), shentsize);
+   
+        Elf64_Shdr * curr = reinterpret_cast<Elf64_Shdr * >(header);
         
-        
+        sectionInfo[i].isValid = true;
+        sectionInfo[i].secType = (unsigned) curr->sh_type;
+        sectionInfo[i].secOffset = (unsigned) curr->sh_offset;
+        sectionInfo[i].secSize = (unsigned) curr->sh_size;
+        sectionInfo[i].secEntsize = (unsigned) curr->sh_entsize;
     }
 
     if (shstrndx >= shnum) { return 0; }
@@ -270,6 +206,7 @@ void ELFFile::printSections() {
 
 void ELFFile::printSymbols() {
     struct SectionInfo * symbolInfo = &sectionInfo[symtabIndex];
+
     if (strcmp(".symtab", symbolInfo->name) != 0) { return; }
 
     unsigned symbolOffset = symbolInfo->secOffset;
@@ -277,19 +214,21 @@ void ELFFile::printSymbols() {
     unsigned i = 0;
 
     while (symbolOffset < end) {
-        // get current symbol
-        unsigned char * curr = getData(symbolOffset, symbolInfo->secSize);
+        unsigned char * curr = getData(symbolOffset, symbolInfo->secEntsize);
 
         if (curr != nullptr) {
             Elf64_Sym * elfSymbol = reinterpret_cast<Elf64_Sym *>(curr);
             unsigned st_name = elfSymbol->st_name;
-            // match string to the ones in elf_names.cpp file
-            const char * name = findString(strtabIndex, st_name);
+            const char * name;
+            if (st_name != 0) {
+                name = findString(strtabIndex, st_name);
+            } else {
+                name = "";
+            }
             printf("Symbol %u: name=%s, size=%lx, info=%lx, other=%lx\n",
                     i, name, elfSymbol->st_size, uint64_t(elfSymbol->st_info), uint64_t(elfSymbol->st_other));
         }
-
-        symbolOffset += symbolInfo->secSize;
+        symbolOffset += symbolInfo->secEntsize;
         i++;
     }
 }
@@ -311,11 +250,3 @@ const char * ELFFile::findString(unsigned symbolIndex, unsigned symbolOffset) {
     }
     return "";
 }
-
-
-
-
-
-
-
-
