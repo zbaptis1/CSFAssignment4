@@ -9,11 +9,11 @@ extern "C" {
 #endif
 
 struct SectionInfo { // Struct for the Sections within the ELF File
-    bool isValid;
+    int isValid;
     const char * name;
     unsigned secType, secOffset, secSize, secEntsize;
 
-    SectionInfo() : isValid(false), name(""), secType(0), secOffset(0), secSize(0), secEntsize(0) { }
+    SectionInfo() : isValid(0), name(""), secType(0), secOffset(0), secSize(0), secEntsize(0) { }
 };
 
 struct ELFFile { // Struct for the overall ELF file and helper methods
