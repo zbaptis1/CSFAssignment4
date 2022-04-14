@@ -47,8 +47,21 @@ unsigned char * ELFData(unsigned offset, unsigned size, size_t fileSize, unsigne
 
     return data + offset; 
 }
-const char * findName(unsigned symbolOffset, unsigned symbolIndex, SectionInfo * sectionInfo, unsigned fileSize, unsigned char * data);
+const char * findName(unsigned symbolOffset, unsigned symbolIndex, SectionInfo * sectionInfo, size_t fileSize, unsigned char * data) {
+    const SectionInfo &info = sectionInfo[symbolIndex]; 
+    unsigned offset = info.secOffset;
+    unsigned index = offset + symbolOffset;
 
+    if (index < offset) { return nullptr; }
+    
+    unsigned i = index;
+    while (i < fileSize) {
+        unsigned char * curr = data + i;
+        if (*curr == '\0') { return reinterpret_cast<const char *>(data + index); }
+        i++;
+    }
+    return "";
+}
 
 int main(int argc, char **argv) {  
     
@@ -65,8 +78,8 @@ int main(int argc, char **argv) {
     struct stat statbuf;
     int rc = fstat(fd, &statbuf);
     if (rc != 0) {
-        cerr << "Couldn't map" << endl;
         close(fd);
+        cerr << "Couldn't map" << endl;
         return 2;
     }
 
@@ -74,8 +87,8 @@ int main(int argc, char **argv) {
 
     unsigned char * data = static_cast<unsigned char *> (mmap(nullptr, fileSize, PROT_READ, MAP_PRIVATE, fd, 0));
     if (data == nullptr) {
-        cerr << "Couldn't map" << endl;
         close(fd);
+        cerr << "Couldn't map" << endl;
         return 2;
     }
 
@@ -93,11 +106,9 @@ int main(int argc, char **argv) {
     printf("Instruction set: %s\n", get_machine_name(machtype));
     printf("Endianness: Little endian\n");
 
-    int allInvalidSections = 0; 
 
     Elf64_Ehdr * sectionHeader = reinterpret_cast<Elf64_Ehdr * > (data);
     if (sectionHeader == nullptr) { 
-        allInvalidSections = 1; 
         return 0; 
     }
     Elf64_Ehdr * header = reinterpret_cast<Elf64_Ehdr * > (data); 
@@ -109,6 +120,8 @@ int main(int argc, char **argv) {
 
 
     SectionInfo * sectionInfo = new SectionInfo[shnum];
+    bool allInvalidSections = false; 
+
     while (!allInvalidSections) {
         unsigned i = 0; 
         while (i < shnum) {
@@ -125,11 +138,10 @@ int main(int argc, char **argv) {
 
         if (shstrndx >= shnum) { 
             allInvalidSections = true;
-            break; 
+            break;
         }
 
         i = 0;
-        
         while (i < shnum) {
             unsigned char * header = ELFData(offset + (i * shentsize), shentsize, fileSize, data);
 
@@ -141,6 +153,7 @@ int main(int argc, char **argv) {
 
             i++;
         }
+        break;
     }
 
     if(allInvalidSections) {
@@ -176,7 +189,7 @@ int main(int argc, char **argv) {
                 const char * name;
 
                 if (st_name != 0) {
-                    name = findName(st_name, strtabIndex, symbolInfo, fileSize, data);
+                    name = findName(st_name, strtabIndex, sectionInfo, fileSize, data);
                 } else {
                     name = "";
                 }
@@ -192,25 +205,4 @@ int main(int argc, char **argv) {
     munmap(data, fileSize);
     close(fd);
     return 0; 
-}
-/*
-unsigned char * ELFdata(unsigned offset, unsigned size, size_t fileSize, unsigned char * data) { 
-    if (offset > fileSize) { return nullptr; }
-    if ((offset + size) > fileSize) { return nullptr; }
-    if ((offset + size) < offset) { return nullptr; }
-
-    return data + offset; 
-}*/
- 
-const char * findName(unsigned symbolOffset, unsigned symbolIndex, SectionInfo * sectionInfo, unsigned fileSize, unsigned char * data) {
-    const SectionInfo &info = sectionInfo[symbolIndex]; 
-    unsigned index = info.secOffset + symbolOffset;
-
-    if (index < info.secOffset) { return nullptr; }
-    
-    for (unsigned i = index; i < fileSize; i++) {
-        unsigned char * curr = data + i;
-        if (*curr == '\0') { return reinterpret_cast<const char *>(data + index); }
-    }
-    return "";
 }
